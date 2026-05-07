@@ -1,0 +1,2 @@
+curl_cffi>=0.7,<0.8
+psycopg[binary]>=3.2,<3.3
