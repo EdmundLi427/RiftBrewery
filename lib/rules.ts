@@ -44,7 +44,10 @@ export interface Deck {
 }
 
 export const DECK_RULES = {
-  mainDeckSize: 40,
+  // Main is 39 "other" cards; the chosen champion (in its own section)
+  // counts toward the deck's 40-card total. So a legal deck has:
+  //   1 champion + 39 main + 3 battlefields + 12 runes = 55 in play
+  mainDeckSize: 39,
   championCount: 1,
   sideboardSize: 8,
   runeCount: 12,

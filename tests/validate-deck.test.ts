@@ -65,7 +65,7 @@ function makeUnitCards(n: number): Card[] {
   }
   return out;
 }
-const FILLER = makeUnitCards(40);
+const FILLER = makeUnitCards(39);
 const FULL_INDEX = new Map([...CARD_INDEX, ...FILLER.map((c): [string, Card] => [c.id, c])]);
 
 function fillerEntries(count: number, section: DeckCardEntry['section']): DeckCardEntry[] {
@@ -81,8 +81,9 @@ function validDeck(): Deck {
     legendCardId: 'LEG-1',
     championCardId: null,
     cards: [
-      // Main: 40 distinct filler units (1 of each).
-      ...fillerEntries(40, 'main'),
+      // Main: 39 distinct filler units (1 of each). Chosen champion lives
+      // in its own section; main is the other 39 cards of the 40-card deck.
+      ...fillerEntries(39, 'main'),
       // Sideboard: 8 distinct filler units (different indices).
       { cardId: 'UNIT-A', section: 'sideboard', quantity: 1 },
       { cardId: 'UNIT-B', section: 'sideboard', quantity: 1 },
@@ -173,18 +174,18 @@ describe('validateDeck — legend', () => {
 describe('validateDeck — section counts', () => {
   const cases: Array<[string, (d: Deck) => void, { section: string; have: number; need: number }]> = [
     [
-      'main too small (39)',
+      'main too small (38)',
       (d) => {
         d.cards = d.cards.filter((c) => c.cardId !== 'FILLER-0');
       },
-      { section: 'main', have: 39, need: 40 },
+      { section: 'main', have: 38, need: 39 },
     ],
     [
-      'main too large (41)',
+      'main too large (40)',
       (d) => {
         d.cards.push({ cardId: 'UNIT-A', section: 'main', quantity: 1 });
       },
-      { section: 'main', have: 41, need: 40 },
+      { section: 'main', have: 40, need: 39 },
     ],
     [
       'sideboard wrong size (7)',

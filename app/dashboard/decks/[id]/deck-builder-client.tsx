@@ -1,6 +1,6 @@
 'use client'
 
-import { useDeferredValue, useEffect, useMemo, useState, useTransition } from 'react';
+import { useCallback, useDeferredValue, useMemo, useRef, useState, useTransition } from 'react';
 import { setLegend, setChampion, addCard, removeCard } from './actions';
 import { DeckCardEntry, validateDeck } from '@/lib/rules';
 import type { CardRow } from '@/lib/cards';
@@ -40,15 +40,45 @@ export default function DeckBuilderClient({
   const [selectedDomain, setSelectedDomain] = useState<Set<string>>(new Set());
 
   // Pagination over the filtered list. Page size matches the render cap
-  // we use for perf — 50 thumbs in the DOM is the sweet spot.
-  const PAGE_SIZE = 50;
+  // we use for perf — ~50 thumbs in the DOM is the sweet spot.
+  //
+  // The page state can fall "out of range" when filters narrow the result
+  // set (e.g. on page 4, then a filter cuts matches to one page). Rather
+  // than reset via useEffect (which causes cascading renders), the pager
+  // clamps `page` to the valid range at render time.
+  // 48 = 6 rows × 8 cols, fills the grid cleanly.
+  const PAGE_SIZE = 48;
   const [page, setPage] = useState(1);
 
-  // Reset to page 1 whenever a filter changes; otherwise navigating to
-  // page 5 and then narrowing the filter strands the user on an empty page.
-  useEffect(() => {
-    setPage(1);
-  }, [cardNameDeferred, cardType, cardEnergy, selectedDomain]);
+  // Hover preview: enlarged card image follows the cursor after a short
+  // dwell. Desktop only — pointer-events: none on the preview means it
+  // never blocks clicks on the underlying thumbnail.
+  const [hoverCard, setHoverCard] = useState<CardRow | null>(null);
+  const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
+  const hoverTimerRef = useRef<number | null>(null);
+
+  const showHover = useCallback((card: CardRow, e: React.MouseEvent) => {
+    const x = e.clientX;
+    const y = e.clientY;
+    if (hoverTimerRef.current !== null) window.clearTimeout(hoverTimerRef.current);
+    hoverTimerRef.current = window.setTimeout(() => {
+      setHoverCard(card);
+      setHoverPos({ x, y });
+    }, 200);
+  }, []);
+
+  const moveHover = useCallback((e: React.MouseEvent) => {
+    setHoverPos({ x: e.clientX, y: e.clientY });
+  }, []);
+
+  const hideHover = useCallback(() => {
+    if (hoverTimerRef.current !== null) {
+      window.clearTimeout(hoverTimerRef.current);
+      hoverTimerRef.current = null;
+    }
+    setHoverCard(null);
+    setHoverPos(null);
+  }, []);
 
   // Deck state. Tracked locally for snappy clicks; server actions persist.
   const [legendId, setLegendId] = useState(initialLegend);
@@ -90,6 +120,13 @@ export default function DeckBuilderClient({
     });
   }, [cardPool, cardNameDeferred, cardType, cardEnergy, selectedDomain]);
 
+  // Clamp page to the valid range so a stale page (e.g. user was on page 5,
+  // then a filter narrowed results to 1 page) doesn't strand the grid empty.
+  const totalPages = Math.max(1, Math.ceil(filteredCards.length / PAGE_SIZE));
+  const safePage = Math.min(Math.max(1, page), totalPages);
+  const pageStart = (safePage - 1) * PAGE_SIZE;
+  const pageEnd = pageStart + PAGE_SIZE;
+
   // Live validation.
   const validation = validateDeck(
     { legendCardId: legendId, championCardId: championId, cards: deckCards },
@@ -104,8 +141,9 @@ export default function DeckBuilderClient({
     rune: deckCards.filter((dc) => dc.section === 'rune').reduce((s, dc) => s + dc.quantity, 0),
   };
 
-  // "Total cards" matches the reference UI: champion + main + battlefield + rune.
-  // Sideboard is excluded (it's a tournament-side concept, not part of the 56).
+  // "Total cards" = champion + main + battlefield + rune (legend is the deck
+  // identity, sideboard is its own thing). A complete deck reads 55:
+  //   1 champion + 39 main + 3 battlefields + 12 runes.
   const totalDeck = counts.champion + counts.main + counts.battlefield + counts.rune;
 
   const handleCardClick = (card: CardRow) => {
@@ -266,17 +304,18 @@ export default function DeckBuilderClient({
         </div>
 
         <div className="grid grid-cols-8 gap-1">
-          {filteredCards
-            .slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE)
-            .map((card) => (
+          {filteredCards.slice(pageStart, pageEnd).map((card) => (
             <button
               key={card.id}
               onClick={() => handleCardClick(card)}
+              onMouseEnter={(e) => showHover(card, e)}
+              onMouseMove={moveHover}
+              onMouseLeave={hideHover}
               disabled={isPending}
               className="relative border border-gray-300 rounded overflow-hidden hover:border-blue-400 hover:ring-1 hover:ring-blue-300 disabled:opacity-30 transition"
               title={`${card.name} — ${card.type}${card.energy !== null ? ` · ${card.energy}` : ''}`}
             >
-              <div className="w-full aspect-square bg-gray-100 overflow-hidden">
+              <div className="w-full aspect-[5/7] bg-gray-100 overflow-hidden">
                 {/* eslint-disable-next-line @next/next/no-img-element */}
                 <img
                   src={card.image_url}
@@ -290,36 +329,35 @@ export default function DeckBuilderClient({
           ))}
         </div>
 
-        {/* Pager — only when there's more than one page of matches */}
-        {filteredCards.length > PAGE_SIZE && (() => {
-          const totalPages = Math.max(1, Math.ceil(filteredCards.length / PAGE_SIZE));
-          const safePage = Math.min(page, totalPages);
-          return (
-            <div className="mt-3 flex items-center justify-center gap-3 text-sm">
-              <button
-                type="button"
-                onClick={() => setPage((p) => Math.max(1, p - 1))}
-                disabled={safePage <= 1}
-                aria-label="Previous page"
-                className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition"
-              >
-                ‹
-              </button>
-              <span className="text-slate-600 tabular-nums">
-                Page {safePage} of {totalPages}
-              </span>
-              <button
-                type="button"
-                onClick={() => setPage((p) => Math.min(totalPages, p + 1))}
-                disabled={safePage >= totalPages}
-                aria-label="Next page"
-                className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition"
-              >
-                ›
-              </button>
-            </div>
-          );
-        })()}
+        {/* Pager — visible whenever there's more than one page, OR whenever
+            the user is currently parked on a page that no longer exists.
+            The second clause gives them an escape back to page 1 after a
+            filter change narrows results below their current page. */}
+        {(totalPages > 1 || page > 1) && (
+          <div className="mt-3 flex items-center justify-center gap-3 text-sm">
+            <button
+              type="button"
+              onClick={() => setPage(Math.max(1, safePage - 1))}
+              disabled={safePage <= 1}
+              aria-label="Previous page"
+              className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition"
+            >
+              ‹
+            </button>
+            <span className="text-slate-600 tabular-nums">
+              Page {safePage} of {totalPages}
+            </span>
+            <button
+              type="button"
+              onClick={() => setPage(Math.min(totalPages, safePage + 1))}
+              disabled={safePage >= totalPages}
+              aria-label="Next page"
+              className="h-8 w-8 inline-flex items-center justify-center rounded-md border border-slate-300 text-slate-700 hover:bg-slate-100 disabled:opacity-40 disabled:cursor-not-allowed transition"
+            >
+              ›
+            </button>
+          </div>
+        )}
       </div>
 
       {/* Right pane: Deck */}
@@ -353,6 +391,9 @@ export default function DeckBuilderClient({
             cards={legendId ? [{ cardId: legendId, quantity: 1 }] : []}
             poolById={poolById}
             onRemove={(cid) => handleRemove(cid, 'legend')}
+            onHover={showHover}
+            onHoverMove={moveHover}
+            onHoverEnd={hideHover}
             isLoading={isPending}
           />
 
@@ -363,6 +404,9 @@ export default function DeckBuilderClient({
             cards={championId ? [{ cardId: championId, quantity: 1 }] : []}
             poolById={poolById}
             onRemove={(cid) => handleRemove(cid, 'champion')}
+            onHover={showHover}
+            onHoverMove={moveHover}
+            onHoverEnd={hideHover}
             isLoading={isPending}
           />
 
@@ -373,16 +417,22 @@ export default function DeckBuilderClient({
             cards={deckCards.filter((dc) => dc.section === 'battlefield')}
             poolById={poolById}
             onRemove={(cid) => handleRemove(cid, 'battlefield')}
+            onHover={showHover}
+            onHoverMove={moveHover}
+            onHoverEnd={hideHover}
             isLoading={isPending}
           />
 
           <DeckSection
             title="Deck"
             count={counts.main}
-            max={40}
+            max={39}
             cards={deckCards.filter((dc) => dc.section === 'main')}
             poolById={poolById}
             onRemove={(cid) => handleRemove(cid, 'main')}
+            onHover={showHover}
+            onHoverMove={moveHover}
+            onHoverEnd={hideHover}
             isLoading={isPending}
           />
 
@@ -393,6 +443,9 @@ export default function DeckBuilderClient({
             cards={deckCards.filter((dc) => dc.section === 'rune')}
             poolById={poolById}
             onRemove={(cid) => handleRemove(cid, 'rune')}
+            onHover={showHover}
+            onHoverMove={moveHover}
+            onHoverEnd={hideHover}
             isLoading={isPending}
           />
 
@@ -403,6 +456,9 @@ export default function DeckBuilderClient({
             cards={deckCards.filter((dc) => dc.section === 'sideboard')}
             poolById={poolById}
             onRemove={(cid) => handleRemove(cid, 'sideboard')}
+            onHover={showHover}
+            onHoverMove={moveHover}
+            onHoverEnd={hideHover}
             isLoading={isPending}
           />
         </div>
@@ -418,10 +474,24 @@ interface DeckSectionProps {
   cards: Array<{ cardId: string; quantity: number }>;
   poolById: Map<string, CardRow>;
   onRemove: (cardId: string) => void;
+  onHover: (card: CardRow, e: React.MouseEvent) => void;
+  onHoverMove: (e: React.MouseEvent) => void;
+  onHoverEnd: () => void;
   isLoading: boolean;
 }
 
-function DeckSection({ title, count, max, cards, poolById, onRemove, isLoading }: DeckSectionProps) {
+function DeckSection({
+  title,
+  count,
+  max,
+  cards,
+  poolById,
+  onRemove,
+  onHover,
+  onHoverMove,
+  onHoverEnd,
+  isLoading,
+}: DeckSectionProps) {
   return (
     <div className="border rounded p-3">
       <div className="flex items-center justify-between mb-2">
@@ -449,8 +519,11 @@ function DeckSection({ title, count, max, cards, poolById, onRemove, isLoading }
                 key={entry.cardId}
                 className="relative border border-gray-300 rounded overflow-hidden group"
                 title={card?.name || entry.cardId}
+                onMouseEnter={card ? (e) => onHover(card, e) : undefined}
+                onMouseMove={card ? onHoverMove : undefined}
+                onMouseLeave={card ? onHoverEnd : undefined}
               >
-                <div className="w-full aspect-square bg-gray-100">
+                <div className="w-full aspect-[5/7] bg-gray-100">
                   {card?.image_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img src={card.image_url} alt={card.name} className="w-full h-full object-cover" />
