@@ -288,7 +288,7 @@ export default function DeckBuilderClient({
   const handleOpenExport = () => {
     const cardName = (id: string) => {
       const row = poolById.get(id);
-      return row ? row.name.replace(/\s*\([^)]*\)$/, '').trim() : id;
+      return row ? row.name.replace(/\s*\([^)]*\)$/, '').trim().replace(' - ', ', ') : id;
     };
     const lines: string[] = [];
     if (legendId) lines.push(`1 ${cardName(legendId)}`);
