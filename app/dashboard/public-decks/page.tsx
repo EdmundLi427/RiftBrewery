@@ -31,7 +31,7 @@ export default async function PublicDecksPage() {
           {decks.map((deck) => (
             <Link
               key={deck.id}
-              href={`/dashboard/decks/${deck.id}`}
+              href={`/dashboard/public-decks/${deck.id}`}
               className="flex items-center gap-4 p-4 rounded-lg border border-gray-200 hover:border-blue-400 hover:shadow-sm transition"
             >
               {deck.legend_image ? (
