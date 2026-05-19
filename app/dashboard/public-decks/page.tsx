@@ -1,4 +1,3 @@
-import { redirect } from 'next/navigation';
 import Link from 'next/link';
 import { getSessionUserId } from '@/lib/session';
 import sql from '@/lib/db';
@@ -6,10 +5,18 @@ import sql from '@/lib/db';
 export default async function PublicDecksPage() {
   await getSessionUserId();
 
-  const decks = await sql<{ id: string; name: string; share_slug: string; owner: string }[]>`
-    SELECT d.id, d.name, d.share_slug, u.email AS owner
+  const decks = await sql<{
+    id: string;
+    name: string;
+    owner: string;
+    legend_name: string | null;
+    legend_image: string | null;
+  }[]>`
+    SELECT d.id, d.name, u.email AS owner,
+           c.name AS legend_name, c.image_url AS legend_image
     FROM decks d
     JOIN users u ON u.id = d.user_id
+    LEFT JOIN cards c ON c.id = d.legend_card_id
     WHERE d.is_public = true
     ORDER BY d.updated_at DESC
   `;
@@ -25,10 +32,24 @@ export default async function PublicDecksPage() {
             <Link
               key={deck.id}
               href={`/dashboard/decks/${deck.id}`}
-              className="block p-4 rounded-lg border border-gray-200 hover:border-blue-400 hover:shadow-sm transition"
+              className="flex items-center gap-4 p-4 rounded-lg border border-gray-200 hover:border-blue-400 hover:shadow-sm transition"
             >
-              <p className="font-semibold">{deck.name}</p>
-              <p className="text-xs text-gray-500 mt-1">by {deck.owner}</p>
+              {deck.legend_image ? (
+                <img
+                  src={deck.legend_image}
+                  alt={deck.legend_name ?? 'Legend'}
+                  className="w-14 h-14 rounded-full object-cover shrink-0 border border-gray-200"
+                />
+              ) : (
+                <div className="w-14 h-14 rounded-full bg-gray-100 shrink-0 border border-gray-200" />
+              )}
+              <div className="min-w-0">
+                <p className="font-semibold truncate">{deck.name}</p>
+                {deck.legend_name && (
+                  <p className="text-xs text-gray-500 truncate">{deck.legend_name.replace(/\s*\([^)]*\)$/, '').replace(' - ', ', ')}</p>
+                )}
+                <p className="text-xs text-gray-400 mt-0.5">by {deck.owner}</p>
+              </div>
             </Link>
           ))}
         </div>
