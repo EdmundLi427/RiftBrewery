@@ -18,6 +18,7 @@ const LEGEND_COLORS = ['body', 'calm'];
 function card(partial: Partial<Card> & Pick<Card, 'id' | 'type'>): Card {
   return {
     name: partial.id,
+    baseName: partial.id,
     colors: [],
     ...partial,
   };

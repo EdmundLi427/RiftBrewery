@@ -25,6 +25,9 @@ export interface CardRow {
   image_url: string;
   tags: string[];
   champion_key: string | null;
+  alternate_art: boolean;
+  signature: boolean;
+  overnumbered: boolean;
 }
 
 /**
@@ -34,6 +37,7 @@ export interface CardRow {
 export function toCard(row: Pick<CardRow, 'id' | 'name' | 'type' | 'domain'>): Card {
   return {
     id: row.id,
+    baseName: row.name.replace(/\s*\([^)]*\)$/, '').trim(),
     name: row.name,
     type: row.type,
     colors: row.domain,

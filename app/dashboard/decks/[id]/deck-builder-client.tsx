@@ -1,7 +1,8 @@
 'use client'
 
 import { useCallback, useDeferredValue, useMemo, useRef, useState, useTransition } from 'react';
-import { setLegend, setChampion, addCard, removeCard } from './actions';
+import { setLegend, setChampion, addCard, removeCard, swapCardArt, replaceDeck } from './actions';
+import { importDeckText } from './import-export';
 import { DeckCardEntry, validateDeck } from '@/lib/rules';
 import type { CardRow } from '@/lib/cards';
 import { toCard } from '@/lib/cards';
@@ -53,6 +54,14 @@ export default function DeckBuilderClient({
   // Hover preview: enlarged card image follows the cursor after a short
   // dwell. Desktop only — pointer-events: none on the preview means it
   // never blocks clicks on the underlying thumbnail.
+  // Import / Export modal state
+  const [showExport, setShowExport] = useState(false);
+  const [exportText, setExportText] = useState('');
+  const [showImport, setShowImport] = useState(false);
+  const [importText, setImportText] = useState('');
+  const [importErrors, setImportErrors] = useState<string[]>([]);
+  const [isImporting, setIsImporting] = useState(false);
+
   const [hoverCard, setHoverCard] = useState<CardRow | null>(null);
   const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
   const hoverTimerRef = useRef<number | null>(null);
@@ -92,17 +101,47 @@ export default function DeckBuilderClient({
     [cardPool]
   );
 
+  // Strip variant suffix from a card name: "Ahri - Alluring (Alt Art)" → "Ahri - Alluring"
+  const baseName = (name: string) => name.replace(/\s*\([^)]*\)$/, '').trim();
+
+  // All printings grouped by base name — used by the art switcher and de-dupe.
+  const variantsByBaseName = useMemo(() => {
+    const map = new Map<string, CardRow[]>();
+    for (const card of cardPool) {
+      const key = baseName(card.name);
+      const group = map.get(key) ?? [];
+      group.push(card);
+      map.set(key, group);
+    }
+    return map;
+  }, [cardPool]);
+
+  // De-duplicated pool for the browse grid: one card per base name.
+  // cardPool is ordered by (name, alternate_art, signature, overnumbered) so the
+  // base print sorts before variants and is picked as the canonical thumbnail.
+  const canonicalPool = useMemo(() => {
+    const seen = new Set<string>();
+    const result: CardRow[] = [];
+    for (const card of cardPool) {
+      const key = baseName(card.name);
+      if (seen.has(key)) continue;
+      seen.add(key);
+      result.push(card);
+    }
+    return result;
+  }, [cardPool]);
+
   // Validator-shape index built once from the full pool. The validator only
-  // needs {id, name, type, colors}; toCard() does the domain → colors rename.
+  // needs {id, riftboundId, name, type, colors}; toCard() does the domain → colors rename.
   const validatorIndex = useMemo(
     () => new Map(cardPool.map((c) => [c.id, toCard(c)])),
     [cardPool]
   );
 
-  // Filtered browse pane.
+  // Filtered browse pane — operates on the de-duplicated canonical pool.
   const filteredCards = useMemo(() => {
     const needle = cardNameDeferred.toLowerCase();
-    return cardPool.filter((card) => {
+    return canonicalPool.filter((card) => {
       if (needle && !card.name.toLowerCase().includes(needle)) return false;
       if (cardType && card.type !== cardType) return false;
       if (cardEnergy !== '' && card.energy !== cardEnergy) return false;
@@ -118,7 +157,7 @@ export default function DeckBuilderClient({
       }
       return true;
     });
-  }, [cardPool, cardNameDeferred, cardType, cardEnergy, selectedDomain]);
+  }, [canonicalPool, cardNameDeferred, cardType, cardEnergy, selectedDomain]);
 
   // Clamp page to the valid range so a stale page (e.g. user was on page 5,
   // then a filter narrowed results to 1 page) doesn't strand the grid empty.
@@ -219,6 +258,73 @@ export default function DeckBuilderClient({
       });
       await removeCard(deckId, cardId, concreteSection);
     });
+  };
+
+  const handleSwapArt = (
+    section: DeckCardEntry['section'] | 'legend' | 'champion'
+  ) => (oldId: string, newId: string) => {
+    if (section === 'legend') {
+      startTransition(async () => {
+        setLegendId(newId);
+        await setLegend(deckId, newId);
+      });
+    } else if (section === 'champion') {
+      startTransition(async () => {
+        setChampionId(newId);
+        await setChampion(deckId, newId);
+      });
+    } else {
+      startTransition(async () => {
+        setDeckCards((prev) =>
+          prev.map((dc) =>
+            dc.cardId === oldId && dc.section === section ? { ...dc, cardId: newId } : dc
+          )
+        );
+        await swapCardArt(deckId, oldId, newId, section);
+      });
+    }
+  };
+
+  const handleOpenExport = () => {
+    const cardName = (id: string) => {
+      const row = poolById.get(id);
+      return row ? row.name.replace(/\s*\([^)]*\)$/, '').trim() : id;
+    };
+    const lines: string[] = [];
+    if (legendId) lines.push(`1 ${cardName(legendId)}`);
+    if (championId) lines.push(`1 ${cardName(championId)}`);
+    const bySection: Record<string, typeof deckCards> = { battlefield: [], rune: [], main: [], sideboard: [] };
+    for (const e of deckCards) {
+      bySection[e.section]?.push(e);
+    }
+    for (const section of ['battlefield', 'rune', 'main'] as const) {
+      for (const e of bySection[section]) lines.push(`${e.quantity} ${cardName(e.cardId)}`);
+    }
+    if (bySection.sideboard.length > 0) {
+      lines.push('Sideboard:');
+      for (const e of bySection.sideboard) lines.push(`${e.quantity} ${cardName(e.cardId)}`);
+    }
+    setExportText(lines.join('\n'));
+    setShowExport(true);
+  };
+
+  const handleImportSubmit = async () => {
+    setIsImporting(true);
+    setImportErrors([]);
+    const result = await importDeckText(importText);
+    if (result.errors && result.errors.length > 0) {
+      setImportErrors(result.errors);
+      setIsImporting(false);
+      return;
+    }
+    // Optimistic update then persist
+    setLegendId(result.legendCardId);
+    setChampionId(result.championCardId);
+    setDeckCards(result.cards);
+    await replaceDeck(deckId, result.legendCardId, result.championCardId, result.cards);
+    setShowImport(false);
+    setImportText('');
+    setIsImporting(false);
   };
 
   return (
@@ -362,7 +468,23 @@ export default function DeckBuilderClient({
 
       {/* Right pane: Deck */}
       <div className={`flex-1 lg:flex-none lg:basis-1/3 ${mobileTab === 'deck' ? 'block' : 'hidden lg:block'}`}>
-        <h2 className="text-lg font-semibold mb-2">Deck Builder</h2>
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-lg font-semibold">Deck Builder</h2>
+          <div className="flex gap-2">
+            <button
+              onClick={handleOpenExport}
+              className="text-xs px-2.5 py-1 rounded border border-gray-300 hover:bg-gray-50 transition"
+            >
+              Export
+            </button>
+            <button
+              onClick={() => { setImportErrors([]); setImportText(''); setShowImport(true); }}
+              className="text-xs px-2.5 py-1 rounded border border-blue-400 text-blue-600 hover:bg-blue-50 transition"
+            >
+              Import
+            </button>
+          </div>
+        </div>
 
         <div className="mb-4 p-3 bg-gray-100 rounded">
           <p className="font-semibold text-sm">Total Cards: {totalDeck}</p>
@@ -390,7 +512,9 @@ export default function DeckBuilderClient({
             max={1}
             cards={legendId ? [{ cardId: legendId, quantity: 1 }] : []}
             poolById={poolById}
+            variantsByBaseName={variantsByBaseName}
             onRemove={(cid) => handleRemove(cid, 'legend')}
+            onSwapArt={handleSwapArt('legend')}
             onHover={showHover}
             onHoverMove={moveHover}
             onHoverEnd={hideHover}
@@ -403,7 +527,9 @@ export default function DeckBuilderClient({
             max={1}
             cards={championId ? [{ cardId: championId, quantity: 1 }] : []}
             poolById={poolById}
+            variantsByBaseName={variantsByBaseName}
             onRemove={(cid) => handleRemove(cid, 'champion')}
+            onSwapArt={handleSwapArt('champion')}
             onHover={showHover}
             onHoverMove={moveHover}
             onHoverEnd={hideHover}
@@ -416,7 +542,9 @@ export default function DeckBuilderClient({
             max={3}
             cards={deckCards.filter((dc) => dc.section === 'battlefield')}
             poolById={poolById}
+            variantsByBaseName={variantsByBaseName}
             onRemove={(cid) => handleRemove(cid, 'battlefield')}
+            onSwapArt={handleSwapArt('battlefield')}
             onHover={showHover}
             onHoverMove={moveHover}
             onHoverEnd={hideHover}
@@ -429,7 +557,9 @@ export default function DeckBuilderClient({
             max={39}
             cards={deckCards.filter((dc) => dc.section === 'main')}
             poolById={poolById}
+            variantsByBaseName={variantsByBaseName}
             onRemove={(cid) => handleRemove(cid, 'main')}
+            onSwapArt={handleSwapArt('main')}
             onHover={showHover}
             onHoverMove={moveHover}
             onHoverEnd={hideHover}
@@ -442,7 +572,9 @@ export default function DeckBuilderClient({
             max={12}
             cards={deckCards.filter((dc) => dc.section === 'rune')}
             poolById={poolById}
+            variantsByBaseName={variantsByBaseName}
             onRemove={(cid) => handleRemove(cid, 'rune')}
+            onSwapArt={handleSwapArt('rune')}
             onHover={showHover}
             onHoverMove={moveHover}
             onHoverEnd={hideHover}
@@ -455,7 +587,9 @@ export default function DeckBuilderClient({
             max={8}
             cards={deckCards.filter((dc) => dc.section === 'sideboard')}
             poolById={poolById}
+            variantsByBaseName={variantsByBaseName}
             onRemove={(cid) => handleRemove(cid, 'sideboard')}
+            onSwapArt={handleSwapArt('sideboard')}
             onHover={showHover}
             onHoverMove={moveHover}
             onHoverEnd={hideHover}
@@ -463,6 +597,84 @@ export default function DeckBuilderClient({
           />
         </div>
       </div>
+
+      {/* Export modal */}
+      {showExport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowExport(false)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-base">Export Decklist</h3>
+              <button onClick={() => setShowExport(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+            </div>
+            <textarea
+              readOnly
+              value={exportText}
+              rows={16}
+              className="w-full font-mono text-xs border rounded p-2 bg-gray-50 resize-none focus:outline-none"
+            />
+            <button
+              onClick={() => navigator.clipboard.writeText(exportText)}
+              className="mt-3 w-full py-2 rounded bg-blue-500 text-white text-sm font-medium hover:bg-blue-600 transition"
+            >
+              Copy to Clipboard
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Import modal */}
+      {showImport && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/50" onClick={() => setShowImport(false)}>
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-md p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="font-semibold text-base">Import Decklist</h3>
+              <button onClick={() => setShowImport(false)} className="text-gray-400 hover:text-gray-600 text-xl leading-none">✕</button>
+            </div>
+            <p className="text-xs text-gray-500 mb-2">Paste your decklist below. This will replace your current deck.</p>
+            <textarea
+              value={importText}
+              onChange={(e) => setImportText(e.target.value)}
+              rows={16}
+              placeholder={'1 Card Name\n1 Champion Name\n1 Battlefield Name\n6 Rune Name\n3 Unit Name\nSideboard:\n2 Sideboard Card'}
+              className="w-full font-mono text-xs border rounded p-2 resize-none focus:outline-none focus:ring-1 focus:ring-blue-400"
+            />
+            {importErrors.length > 0 && (
+              <ul className="mt-2 text-xs text-red-600 space-y-0.5">
+                {importErrors.map((e, i) => <li key={i}>• {e}</li>)}
+              </ul>
+            )}
+            <button
+              onClick={handleImportSubmit}
+              disabled={isImporting || !importText.trim()}
+              className="mt-3 w-full py-2 rounded bg-blue-500 text-white text-sm font-medium hover:bg-blue-600 disabled:opacity-50 transition"
+            >
+              {isImporting ? 'Importing…' : 'Import Deck'}
+            </button>
+          </div>
+        </div>
+      )}
+
+      {hoverCard && hoverPos && (
+        <div
+          className="fixed z-50 pointer-events-none rounded-lg overflow-hidden shadow-2xl border-2 border-gray-200"
+          style={{
+            width: 220,
+            left:
+              hoverPos.x > window.innerWidth - 260
+                ? hoverPos.x - 220 - 16
+                : hoverPos.x + 16,
+            top: Math.min(hoverPos.y - 40, window.innerHeight - 320),
+          }}
+        >
+          {/* eslint-disable-next-line @next/next/no-img-element */}
+          <img
+            src={hoverCard.image_url}
+            alt={hoverCard.name}
+            className="w-full object-cover"
+            style={{ aspectRatio: '5 / 7' }}
+          />
+        </div>
+      )}
     </div>
   );
 }
@@ -473,7 +685,9 @@ interface DeckSectionProps {
   max: number;
   cards: Array<{ cardId: string; quantity: number }>;
   poolById: Map<string, CardRow>;
+  variantsByBaseName: Map<string, CardRow[]>;
   onRemove: (cardId: string) => void;
+  onSwapArt: (oldCardId: string, newCardId: string) => void;
   onHover: (card: CardRow, e: React.MouseEvent) => void;
   onHoverMove: (e: React.MouseEvent) => void;
   onHoverEnd: () => void;
@@ -486,7 +700,9 @@ function DeckSection({
   max,
   cards,
   poolById,
+  variantsByBaseName,
   onRemove,
+  onSwapArt,
   onHover,
   onHoverMove,
   onHoverEnd,
@@ -514,6 +730,9 @@ function DeckSection({
         >
           {cards.map((entry) => {
             const card = poolById.get(entry.cardId);
+            const variants = card ? (variantsByBaseName.get(card.name.replace(/\s*\([^)]*\)$/, '').trim()) ?? []) : [];
+            const variantIdx = variants.findIndex((v) => v.id === entry.cardId);
+            const hasVariants = variants.length > 1;
             return (
               <div
                 key={entry.cardId}
@@ -541,10 +760,33 @@ function DeckSection({
                 <button
                   onClick={() => onRemove(entry.cardId)}
                   disabled={isLoading}
-                  className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-60 flex items-center justify-center opacity-0 group-hover:opacity-100 disabled:opacity-50 transition text-white font-bold text-sm"
+                  className="absolute inset-0 bg-black bg-opacity-0 group-hover:bg-opacity-40 flex items-center justify-center opacity-0 group-hover:opacity-100 disabled:opacity-50 transition text-white font-bold text-sm"
                 >
                   ✕
                 </button>
+
+                {hasVariants && (
+                  <div className="absolute bottom-0 left-0 right-0 flex justify-between opacity-0 group-hover:opacity-100 transition pointer-events-none group-hover:pointer-events-auto">
+                    <button
+                      className="bg-black/70 text-white text-xs px-1 py-0.5 rounded-br"
+                      disabled={isLoading}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const prev = variants[(variantIdx - 1 + variants.length) % variants.length];
+                        onSwapArt(entry.cardId, prev.id);
+                      }}
+                    >‹</button>
+                    <button
+                      className="bg-black/70 text-white text-xs px-1 py-0.5 rounded-bl"
+                      disabled={isLoading}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        const next = variants[(variantIdx + 1) % variants.length];
+                        onSwapArt(entry.cardId, next.id);
+                      }}
+                    >›</button>
+                  </div>
+                )}
               </div>
             );
           })}

@@ -268,10 +268,14 @@ export async function saveDeck(
   await sql.begin(async (tx) => {
     await tx`DELETE FROM deck_cards WHERE deck_id = ${deckId}`;
 
-    for (const entry of deckData) {
+    if (deckData.length > 0) {
       await tx`
-        INSERT INTO deck_cards (deck_id, card_id, section, quantity)
-        VALUES (${deckId}, ${entry.cardId}, ${entry.section}, ${entry.quantity})
+        INSERT INTO deck_cards ${tx(deckData.map(e => ({
+          deck_id: deckId,
+          card_id: e.cardId,
+          section: e.section,
+          quantity: e.quantity,
+        })))}
       `;
     }
 
@@ -307,37 +311,28 @@ export async function togglePublic(
   }
 
   if (isPublic) {
-    // Generate slug if needed
     let slug = deck.share_slug;
     if (!slug) {
-      // Use first 8 chars of UUID-like string
-      slug = Math.random().toString(36).slice(2, 10);
-      // Ensure uniqueness with a retry loop (simple approach)
-      let attempts = 0;
-      while (attempts < 5) {
-        const [existing] = await sql<{ id: string }[]>`
-          SELECT id FROM decks WHERE share_slug = ${slug} LIMIT 1
-        `;
-        if (!existing) break;
-        slug = Math.random().toString(36).slice(2, 10);
-        attempts++;
+      const { randomBytes } = await import('crypto');
+      let saved = false;
+      for (let i = 0; i < 10 && !saved; i++) {
+        const candidate = randomBytes(6).toString('base64url');
+        try {
+          await sql`UPDATE decks SET is_public = true, share_slug = ${candidate} WHERE id = ${deckId}`;
+          slug = candidate;
+          saved = true;
+        } catch (e: any) {
+          if (e.code !== '23505') throw e;
+        }
       }
+      if (!saved) return { message: 'Failed to generate unique slug' };
+    } else {
+      await sql`UPDATE decks SET is_public = true WHERE id = ${deckId}`;
     }
-
-    await sql`
-      UPDATE decks
-      SET is_public = true, share_slug = ${slug}
-      WHERE id = ${deckId}
-    `;
 
     return { message: 'Deck is now public', slug };
   } else {
-    await sql`
-      UPDATE decks
-      SET is_public = false
-      WHERE id = ${deckId}
-    `;
-
+    await sql`UPDATE decks SET is_public = false WHERE id = ${deckId}`;
     return { message: 'Deck is now private' };
   }
 }

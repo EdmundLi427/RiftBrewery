@@ -21,6 +21,8 @@ export type DeckSection = 'main' | 'sideboard' | 'battlefield' | 'rune' | 'champ
  */
 export interface Card {
   id: string;
+  /** Name with variant suffix stripped, e.g. "Ahri - Alluring" for all prints. Used for copy-limit grouping. */
+  baseName: string;
   name: string;
   type: CardType;
   /** Lowercase colour strings, e.g. ["body", "calm"]. Order-insensitive. */
@@ -164,10 +166,12 @@ export function validateDeck(
         }
       }
 
-      // Fallback: name substring match
+      // Fallback: base-name match. Card names follow "CharacterName - Title" format.
+      // Extract the part before " - " from both sides and compare.
       if (!matches) {
-        const championName = champion.name.split(',')[0].trim(); // "Draven" from "Draven, Showboat"
-        matches = legendCard.name.includes(championName);
+        const championBase = champion.name.split(' - ')[0].trim();
+        const legendBase = legendCard.name.split(' - ')[0].trim();
+        matches = championBase.length > 0 && championBase === legendBase;
       }
 
       if (!matches) {
@@ -233,23 +237,33 @@ export function validateDeck(
   }
 
   // --- Champion + main + sideboard copy limit ----------------------------
+  // Keyed by riftboundId so alternate art versions of the same card count
+  // together. firstCardIdByRiftbound tracks a real card ID per group for
+  // the error payload (formatDeckError needs a card ID it can look up).
   const copyTotals = new Map<string, number>();
+  const firstCardIdByRiftbound = new Map<string, string>();
 
-  // Include champion in copy limit
+  const trackCopy = (cardId: string, quantity: number) => {
+    const card = lookup(cardId);
+    const key = card?.baseName ?? cardId;
+    copyTotals.set(key, (copyTotals.get(key) ?? 0) + quantity);
+    if (!firstCardIdByRiftbound.has(key)) firstCardIdByRiftbound.set(key, cardId);
+  };
+
   if (deck.championCardId) {
-    copyTotals.set(deck.championCardId, 1);
+    trackCopy(deck.championCardId, 1);
   }
 
   for (const entry of deck.cards) {
     if (!DECK_RULES.copyLimitScope.has(entry.section)) continue;
-    copyTotals.set(entry.cardId, (copyTotals.get(entry.cardId) ?? 0) + entry.quantity);
+    trackCopy(entry.cardId, entry.quantity);
   }
 
-  for (const [cardId, total] of copyTotals) {
+  for (const [key, total] of copyTotals) {
     if (total > DECK_RULES.maxCopiesPerCard) {
       errors.push({
         kind: 'copy_limit',
-        cardId,
+        cardId: firstCardIdByRiftbound.get(key) ?? key,
         total,
         max: DECK_RULES.maxCopiesPerCard,
       });

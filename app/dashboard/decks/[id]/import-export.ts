@@ -1,107 +1,125 @@
 'use server'
 
-import { DeckCardEntry, Deck } from '@/lib/rules';
+import { DeckCardEntry } from '@/lib/rules';
 import sql from '@/lib/db';
 
-/**
- * Export deck to text format.
- * Format: legend line + champion line (optional) + one line per card: "quantity cardId [section]"
- */
-export function exportDeckText(deck: Deck): string {
-  const lines: string[] = [];
-
-  // Legend line
-  if (deck.legendCardId) {
-    lines.push(`legend: ${deck.legendCardId}`);
-  }
-
-  // Champion line
-  if (deck.championCardId) {
-    lines.push(`champion: ${deck.championCardId}`);
-  }
-
-  // Card lines: quantity cardId section
-  for (const entry of deck.cards) {
-    lines.push(`${entry.quantity} ${entry.cardId} ${entry.section}`);
-  }
-
-  return lines.join('\n');
-}
-
-/**
- * Import deck from text format.
- * Parses the format, looks up card IDs, returns entries or error.
- */
-export async function importDeckText(text: string): Promise<{
+export interface ImportResult {
   legendCardId: string | null;
   championCardId: string | null;
   cards: DeckCardEntry[];
   errors?: string[];
-}> {
-  const errors: string[] = [];
-  const lines = text.trim().split('\n').filter((l) => l.trim());
+}
 
-  let legendCardId: string | null = null;
-  let championCardId: string | null = null;
-  const entries: DeckCardEntry[] = [];
-  const cardIds: Set<string> = new Set();
+/**
+ * Import a deck from human-readable text format.
+ *
+ * Format:
+ *   {qty} {card name}       (one line per entry)
+ *   Sideboard:              (section separator — everything after is sideboard)
+ *
+ * Sections before "Sideboard:" are inferred from card type:
+ *   legend       → legendCardId (quantity ignored, always 1)
+ *   champion_unit → championCardId (quantity ignored, always 1)
+ *   battlefield  → section 'battlefield'
+ *   rune         → section 'rune'
+ *   everything else → section 'main'
+ */
+export async function importDeckText(text: string): Promise<ImportResult> {
+  const errors: string[] = [];
+  const lines = text.trim().split('\n');
+  let inSideboard = false;
+
+  // Accepts both "Fiora, Grand Duelist" (comma style) and "Fiora - Grand Duelist" (DB style).
+  const normalizeName = (name: string) => name.replace(/,\s+/g, ' - ');
+
+  type ParsedLine = { qty: number; rawName: string; sideboard: boolean; lineNum: number };
+  const parsed: ParsedLine[] = [];
 
   for (let i = 0; i < lines.length; i++) {
     const line = lines[i].trim();
     if (!line) continue;
-
-    // Check for legend line
-    if (line.startsWith('legend:')) {
-      legendCardId = line.slice('legend:'.length).trim();
-      cardIds.add(legendCardId);
+    if (line.toLowerCase() === 'sideboard:') {
+      inSideboard = true;
       continue;
     }
 
-    // Check for champion line
-    if (line.startsWith('champion:')) {
-      championCardId = line.slice('champion:'.length).trim();
-      cardIds.add(championCardId);
+    const m = line.match(/^(\d+)\s+(.+)$/);
+    if (!m) {
+      errors.push(`Line ${i + 1}: invalid format — expected "N Card Name"`);
       continue;
     }
 
-    // Parse card line: "quantity cardId [section]"
-    const parts = line.split(/\s+/);
-    if (parts.length < 2) {
-      errors.push(`Line ${i + 1}: invalid format (expected "quantity cardId [section]")`);
+    const qty = parseInt(m[1], 10);
+    if (qty < 1) {
+      errors.push(`Line ${i + 1}: quantity must be at least 1`);
       continue;
     }
 
-    const quantity = parseInt(parts[0], 10);
-    const cardId = parts[1];
-    const section = (parts[2] || 'main') as 'main' | 'sideboard' | 'battlefield' | 'rune' | 'champion';
-
-    if (isNaN(quantity) || quantity < 1) {
-      errors.push(`Line ${i + 1}: invalid quantity`);
-      continue;
-    }
-
-    if (!['main', 'sideboard', 'battlefield', 'rune', 'champion'].includes(section)) {
-      errors.push(`Line ${i + 1}: invalid section "${section}"`);
-      continue;
-    }
-
-    entries.push({ cardId, section, quantity });
-    cardIds.add(cardId);
+    parsed.push({ qty, rawName: normalizeName(m[2].trim()), sideboard: inSideboard, lineNum: i + 1 });
   }
 
-  // Verify all card IDs exist
-  if (cardIds.size > 0) {
-    const found = await sql<{ id: string }[]>`
-      SELECT id FROM cards WHERE id = ANY(${Array.from(cardIds)})
-    `;
-    const foundIds = new Set(found.map((c) => c.id));
+  if (parsed.length === 0 && errors.length === 0) {
+    return { legendCardId: null, championCardId: null, cards: [], errors: ['Empty decklist'] };
+  }
 
-    for (const id of cardIds) {
-      if (!foundIds.has(id)) {
-        errors.push(`Unknown card ID: ${id}`);
-      }
+  // Batch-lookup by name — prefer base prints (alternate_art=false, signature=false, overnumbered=false).
+  // Use IN ${sql(array)} (individual parameters) instead of = ANY(array) because postgres.js
+  // serialises ANY arrays as text array literals where values with commas must be quoted —
+  // IN with separate bindings sidesteps that entirely.
+  const uniqueNames = [...new Set(parsed.map((p) => p.rawName.toLowerCase()))];
+  const rows = await sql<{ id: string; name: string; type: string }[]>`
+    SELECT DISTINCT ON (LOWER(name)) id, name, type
+    FROM cards
+    WHERE LOWER(name) IN ${sql(uniqueNames)}
+    ORDER BY LOWER(name), alternate_art, signature, overnumbered, set_id
+  `;
+
+  const byName = new Map(rows.map((r) => [r.name.toLowerCase(), r]));
+
+  let legendCardId: string | null = null;
+  let championCardId: string | null = null;
+  const cards: DeckCardEntry[] = [];
+
+  for (const p of parsed) {
+    const row = byName.get(p.rawName.toLowerCase());
+    if (!row) {
+      errors.push(`Line ${p.lineNum}: card not found — "${p.rawName}"`);
+      continue;
+    }
+
+    if (p.sideboard) {
+      cards.push({ cardId: row.id, section: 'sideboard', quantity: p.qty });
+      continue;
+    }
+
+    // Infer section from card type
+    switch (row.type) {
+      case 'legend':
+        legendCardId = row.id;
+        break;
+      case 'champion_unit':
+        if (!championCardId) {
+          championCardId = row.id;
+        } else {
+          // Second champion_unit goes to main
+          cards.push({ cardId: row.id, section: 'main', quantity: p.qty });
+        }
+        break;
+      case 'battlefield':
+        cards.push({ cardId: row.id, section: 'battlefield', quantity: p.qty });
+        break;
+      case 'rune':
+        cards.push({ cardId: row.id, section: 'rune', quantity: p.qty });
+        break;
+      default:
+        cards.push({ cardId: row.id, section: 'main', quantity: p.qty });
     }
   }
 
-  return { legendCardId, championCardId, cards: entries, errors: errors.length > 0 ? errors : undefined };
+  return {
+    legendCardId,
+    championCardId,
+    cards,
+    errors: errors.length > 0 ? errors : undefined,
+  };
 }

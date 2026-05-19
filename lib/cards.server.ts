@@ -31,9 +31,10 @@ export async function getCardPool(): Promise<CardRow[]> {
   return sql<CardRow[]>`
     SELECT id, riftbound_id, name, type, supertype, rarity, domain,
            energy, might, power, text_plain, text_flavour,
-           set_id, set_label, image_url, tags, champion_key
+           set_id, set_label, image_url, tags, champion_key,
+           alternate_art, signature, overnumbered
       FROM cards
      WHERE supertype IS DISTINCT FROM 'Token'
-     ORDER BY name
+     ORDER BY name, alternate_art, signature, overnumbered
   `;
 }
