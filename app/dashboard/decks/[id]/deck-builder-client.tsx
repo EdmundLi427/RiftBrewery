@@ -1,7 +1,7 @@
 'use client'
 
 import { useCallback, useDeferredValue, useMemo, useRef, useState, useTransition } from 'react';
-import { setLegend, setChampion, addCard, removeCard, swapCardArt, replaceDeck } from './actions';
+import { setLegend, setChampion, addCard, removeCard, swapCardArt, replaceDeck, setPublic } from './actions';
 import { importDeckText } from './import-export';
 import { DeckCardEntry, validateDeck } from '@/lib/rules';
 import type { CardRow } from '@/lib/cards';
@@ -16,6 +16,8 @@ interface DeckBuilderClientProps {
   initialCards: DeckCardEntry[];
   /** Full browseable card pool (~1k rows). Stable across deck loads. */
   cardPool: CardRow[];
+  initialIsPublic: boolean;
+  shareSlug: string | null;
 }
 
 type TabType = 'cards' | 'deck';
@@ -26,6 +28,8 @@ export default function DeckBuilderClient({
   initialChampion,
   initialCards,
   cardPool,
+  initialIsPublic,
+  shareSlug,
 }: DeckBuilderClientProps) {
   const [isPending, startTransition] = useTransition();
   const [mobileTab, setMobileTab] = useState<TabType>('cards');
@@ -61,6 +65,13 @@ export default function DeckBuilderClient({
   const [importText, setImportText] = useState('');
   const [importErrors, setImportErrors] = useState<string[]>([]);
   const [isImporting, setIsImporting] = useState(false);
+
+  const [isPublic, setIsPublic] = useState(initialIsPublic);
+
+  const handleTogglePublic = (checked: boolean) => {
+    setIsPublic(checked);
+    startTransition(() => setPublic(deckId, checked));
+  };
 
   const [hoverCard, setHoverCard] = useState<CardRow | null>(null);
   const [hoverPos, setHoverPos] = useState<{ x: number; y: number } | null>(null);
@@ -470,7 +481,18 @@ export default function DeckBuilderClient({
       <div className={`flex-1 lg:flex-none lg:basis-1/3 ${mobileTab === 'deck' ? 'block' : 'hidden lg:block'}`}>
         <div className="flex items-center justify-between mb-2">
           <h2 className="text-lg font-semibold">Deck Builder</h2>
-          <div className="flex gap-2">
+          <div className="flex items-center gap-2">
+            <label className="flex items-center gap-1.5 cursor-pointer select-none">
+              <span className="text-xs text-gray-500">Public</span>
+              <button
+                role="switch"
+                aria-checked={isPublic}
+                onClick={() => handleTogglePublic(!isPublic)}
+                className={`relative inline-flex h-5 w-9 shrink-0 rounded-full border-2 border-transparent transition-colors focus:outline-none ${isPublic ? 'bg-blue-500' : 'bg-gray-300'}`}
+              >
+                <span className={`inline-block h-4 w-4 transform rounded-full bg-white shadow transition-transform ${isPublic ? 'translate-x-4' : 'translate-x-0'}`} />
+              </button>
+            </label>
             <button
               onClick={handleOpenExport}
               className="text-xs px-2.5 py-1 rounded border border-gray-300 hover:bg-gray-50 transition"

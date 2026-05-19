@@ -199,6 +199,39 @@ export async function deleteDeck(deckId: string) {
 }
 
 /**
+ * Set the public visibility of a deck, generating a share slug on first publish.
+ */
+export async function setPublic(deckId: string, isPublic: boolean) {
+  const userId = await getSessionUserId();
+
+  const [deck] = await sql<{ user_id: number; share_slug: string | null }[]>`
+    SELECT user_id, share_slug FROM decks WHERE id = ${deckId} LIMIT 1
+  `;
+
+  if (!deck || deck.user_id !== userId) {
+    throw new Error('Deck not found or access denied');
+  }
+
+  if (isPublic && !deck.share_slug) {
+    const { randomBytes } = await import('crypto');
+    for (let i = 0; i < 10; i++) {
+      const candidate = randomBytes(6).toString('base64url');
+      try {
+        await sql`UPDATE decks SET is_public = true, share_slug = ${candidate} WHERE id = ${deckId}`;
+        break;
+      } catch (e: any) {
+        if (e.code !== '23505') throw e;
+      }
+    }
+  } else {
+    await sql`UPDATE decks SET is_public = ${isPublic} WHERE id = ${deckId}`;
+  }
+
+  revalidatePath(`/dashboard/decks/${deckId}`);
+  revalidatePath('/dashboard/public-decks');
+}
+
+/**
  * Bulk-replace the entire deck contents (used after import).
  * Runs in a transaction: clears existing cards then inserts the new set.
  */

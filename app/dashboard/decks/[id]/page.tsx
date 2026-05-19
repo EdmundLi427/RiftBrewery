@@ -35,12 +35,6 @@ export default async function DeckBuilderPage(props: { params: Promise<{ id: str
           <h1 className="text-2xl font-bold">{deck.name}</h1>
         </div>
 
-        {deck.isPublic && deck.shareSlug && (
-          <div className="bg-blue-50 border border-blue-200 rounded p-2">
-            <p className="text-xs font-semibold text-blue-700">Public</p>
-            <p className="text-xs text-blue-600 font-mono">/d/{deck.shareSlug}</p>
-          </div>
-        )}
       </div>
 
       <DeckBuilderClient
@@ -49,6 +43,8 @@ export default async function DeckBuilderPage(props: { params: Promise<{ id: str
         initialChampion={deck.championCardId}
         initialCards={deck.cards}
         cardPool={cardPool}
+        initialIsPublic={deck.isPublic}
+        shareSlug={deck.shareSlug}
       />
     </div>
   );
