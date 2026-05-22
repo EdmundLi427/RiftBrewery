@@ -62,7 +62,7 @@ Return exactly this JSON (no markdown, no extra text):
 - Ignore conditional or scaling damage; use only the stated base number."""
 
     response = client.messages.create(
-        model='claude-haiku-4-5-20241001',
+        model='claude-opus-4-7',
         max_tokens=100,
         messages=[{'role': 'user', 'content': prompt}],
     )

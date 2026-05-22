@@ -50,7 +50,7 @@ Domains: ${Object.entries(stats.domains)
 `;
 
   const response = await client.messages.create({
-    model: 'claude-haiku-4-5-20241001',
+    model: 'claude-opus-4-7',
     max_tokens: 1000,
     system: RIFTBOUND_EXPERT_PROMPT,
     messages: [
