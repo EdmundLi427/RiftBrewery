@@ -28,6 +28,12 @@ export default async function MatchupPage(props: { params: Promise<{ id: string 
 
   if (!matchup) notFound();
 
+  const stats = typeof matchup.stats === 'string' ? JSON.parse(matchup.stats) : matchup.stats;
+  const gameplanA = matchup.gameplan_a ? (typeof matchup.gameplan_a === 'string' ? JSON.parse(matchup.gameplan_a) : matchup.gameplan_a) : null;
+  const gameplanB = matchup.gameplan_b ? (typeof matchup.gameplan_b === 'string' ? JSON.parse(matchup.gameplan_b) : matchup.gameplan_b) : null;
+  const interaction = matchup.interaction ? (typeof matchup.interaction === 'string' ? JSON.parse(matchup.interaction) : matchup.interaction) : null;
+  const verdict = matchup.verdict ? (typeof matchup.verdict === 'string' ? JSON.parse(matchup.verdict) : matchup.verdict) : null;
+
   return (
     <main className="w-full max-w-4xl">
       <Link href="/dashboard/matchups" className="text-blue-500 hover:underline text-sm mb-4 inline-block">
@@ -36,11 +42,11 @@ export default async function MatchupPage(props: { params: Promise<{ id: string 
 
       <MatchupClient
         matchupId={matchup.id}
-        stats={matchup.stats}
-        gameplanA={matchup.gameplan_a}
-        gameplanB={matchup.gameplan_b}
-        interaction={matchup.interaction}
-        verdict={matchup.verdict}
+        stats={stats}
+        gameplanA={gameplanA}
+        gameplanB={gameplanB}
+        interaction={interaction}
+        verdict={verdict}
       />
     </main>
   );

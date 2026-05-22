@@ -7,7 +7,7 @@ import type { Gameplan, Interaction, Verdict } from '@/lib/matchup/ai';
 
 interface Props {
   matchupId: string;
-  stats: MatchupStats;
+  stats: any;
   gameplanA: Gameplan | null;
   gameplanB: Gameplan | null;
   interaction: Interaction | null;
@@ -79,6 +79,10 @@ export default function MatchupClient({
   };
 
   const stats = initialStats as any;
+
+  if (!stats?.deckA?.name || !stats?.deckB?.name) {
+    return <div className="p-4 text-red-600">Error: Invalid matchup data</div>;
+  }
 
   return (
     <div className="space-y-8">
