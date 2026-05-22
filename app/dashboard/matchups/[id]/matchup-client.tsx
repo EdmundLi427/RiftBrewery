@@ -91,49 +91,55 @@ export default function MatchupClient({
       {/* Stats Comparison */}
       <section>
         <h2 className="text-xl font-semibold mb-4">Stats Comparison</h2>
-        <div className="grid grid-cols-2 gap-6">
-          {/* Energy */}
-          <div className="p-4 border border-gray-200 rounded-lg">
-            <h3 className="font-semibold text-sm mb-2">Energy</h3>
-            <p className="text-xs text-gray-600">
-              Deck A: avg {stats.deckA.energy.avg}, median {stats.deckA.energy.median}
-            </p>
-            <p className="text-xs text-gray-600">
-              Deck B: avg {stats.deckB.energy.avg}, median {stats.deckB.energy.median}
-            </p>
-          </div>
+        {stats?.deckA?.energy && stats?.deckB?.energy ? (
+          <div className="grid grid-cols-2 gap-6">
+            {/* Energy */}
+            <div className="p-4 border border-gray-200 rounded-lg">
+              <h3 className="font-semibold text-sm mb-2">Energy</h3>
+              <p className="text-xs text-gray-600">
+                Deck A: avg {stats.deckA.energy?.avg ?? '—'}, median {stats.deckA.energy?.median ?? '—'}
+              </p>
+              <p className="text-xs text-gray-600">
+                Deck B: avg {stats.deckB.energy?.avg ?? '—'}, median {stats.deckB.energy?.median ?? '—'}
+              </p>
+            </div>
 
-          {/* Might */}
-          <div className="p-4 border border-gray-200 rounded-lg">
-            <h3 className="font-semibold text-sm mb-2">Might (by Cost Bucket)</h3>
-            <p className="text-xs text-gray-600">
-              Deck A: low {stats.deckA.might.byBucket.low}, mid {stats.deckA.might.byBucket.mid}, top{' '}
-              {stats.deckA.might.byBucket.topEnd}
-            </p>
-            <p className="text-xs text-gray-600">
-              Deck B: low {stats.deckB.might.byBucket.low}, mid {stats.deckB.might.byBucket.mid}, top{' '}
-              {stats.deckB.might.byBucket.topEnd}
-            </p>
-          </div>
+            {/* Might */}
+            <div className="p-4 border border-gray-200 rounded-lg">
+              <h3 className="font-semibold text-sm mb-2">Might (by Cost Bucket)</h3>
+              <p className="text-xs text-gray-600">
+                Deck A: low {stats.deckA.might?.byBucket?.low ?? '—'}, mid {stats.deckA.might?.byBucket?.mid ?? '—'}, top{' '}
+                {stats.deckA.might?.byBucket?.topEnd ?? '—'}
+              </p>
+              <p className="text-xs text-gray-600">
+                Deck B: low {stats.deckB.might?.byBucket?.low ?? '—'}, mid {stats.deckB.might?.byBucket?.mid ?? '—'}, top{' '}
+                {stats.deckB.might?.byBucket?.topEnd ?? '—'}
+              </p>
+            </div>
 
-          {/* Composition */}
-          <div className="p-4 border border-gray-200 rounded-lg">
-            <h3 className="font-semibold text-sm mb-2">Composition</h3>
-            <p className="text-xs text-gray-600">
-              Deck A: {stats.deckA.composition.units}u, {stats.deckA.composition.spells}s, {stats.deckA.composition.gears}g
-            </p>
-            <p className="text-xs text-gray-600">
-              Deck B: {stats.deckB.composition.units}u, {stats.deckB.composition.spells}s, {stats.deckB.composition.gears}g
-            </p>
-          </div>
+            {/* Composition */}
+            <div className="p-4 border border-gray-200 rounded-lg">
+              <h3 className="font-semibold text-sm mb-2">Composition</h3>
+              <p className="text-xs text-gray-600">
+                Deck A: {stats.deckA.composition?.units ?? 0}u, {stats.deckA.composition?.spells ?? 0}s, {stats.deckA.composition?.gears ?? 0}g
+              </p>
+              <p className="text-xs text-gray-600">
+                Deck B: {stats.deckB.composition?.units ?? 0}u, {stats.deckB.composition?.spells ?? 0}s, {stats.deckB.composition?.gears ?? 0}g
+              </p>
+            </div>
 
-          {/* Spell Damage */}
-          <div className="p-4 border border-gray-200 rounded-lg">
-            <h3 className="font-semibold text-sm mb-2">Spell Damage</h3>
-            <p className="text-xs text-gray-600">Deck A: {stats.deckA.spellDamage.totalDamage} total damage</p>
-            <p className="text-xs text-gray-600">Deck B: {stats.deckB.spellDamage.totalDamage} total damage</p>
+            {/* Spell Damage */}
+            <div className="p-4 border border-gray-200 rounded-lg">
+              <h3 className="font-semibold text-sm mb-2">Spell Damage</h3>
+              <p className="text-xs text-gray-600">Deck A: {stats.deckA.spellDamage?.totalDamage ?? 0} total damage</p>
+              <p className="text-xs text-gray-600">Deck B: {stats.deckB.spellDamage?.totalDamage ?? 0} total damage</p>
+            </div>
           </div>
-        </div>
+        ) : (
+          <div className="p-4 bg-gray-50 border border-gray-200 rounded text-center text-sm text-gray-600">
+            Stats data loading...
+          </div>
+        )}
       </section>
 
       {/* Gameplans */}
