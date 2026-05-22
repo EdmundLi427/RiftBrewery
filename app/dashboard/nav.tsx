@@ -12,6 +12,7 @@ const LINKS: Array<{ href: string; label: string }> = [
   { href: '/dashboard/decks', label: 'My Decks' },
   { href: '/dashboard/cards', label: 'Cards' },
   { href: '/dashboard/public-decks', label: 'Public Decks' },
+  { href: '/dashboard/matchups', label: 'Matchups' },
   { href: '/dashboard/account', label: 'Account' },
 ];
 
