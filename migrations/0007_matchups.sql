@@ -34,6 +34,7 @@ CREATE INDEX IF NOT EXISTS matchups_user_id_idx   ON matchups(user_id);
 CREATE INDEX IF NOT EXISTS matchups_pair_hash_idx ON matchups(pair_hash);
 
 -- Automatic updated_at bump on row update (reuse trigger from decks).
-CREATE TRIGGER IF NOT EXISTS matchups_set_updated_at
+DROP TRIGGER IF EXISTS matchups_set_updated_at ON matchups;
+CREATE TRIGGER matchups_set_updated_at
   BEFORE UPDATE ON matchups
   FOR EACH ROW EXECUTE FUNCTION set_updated_at();
