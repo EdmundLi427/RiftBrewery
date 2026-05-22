@@ -160,17 +160,18 @@ export async function populateGameplans(matchupId: string) {
   ].filter(Boolean);
 
   const formatCardListForAI = (cardList: any[]) =>
-    cardList.map((c) => {
+    cardList.filter((c) => c && c.id).map((c) => {
       const card = cardPool.get(c.id);
+      if (!card) return null;
       return {
         quantity: c.quantity as number,
-        name: card?.name || 'Unknown',
-        type: card?.type || 'unknown',
-        energy: card?.energy ?? undefined,
-        might: card?.might ?? undefined,
-        text: (card?.text_plain ?? undefined) as string | undefined,
+        name: card.name || 'Unknown',
+        type: card.type || 'unknown',
+        energy: card.energy ?? null,
+        might: card.might ?? null,
+        text: card.text_plain ?? undefined,
       };
-    });
+    }).filter((c): c is any => c !== null);
 
   // Run gameplans
   const gameplanA = await runGameplan(formatCardListForAI(cardListA as any), stats.deckA);

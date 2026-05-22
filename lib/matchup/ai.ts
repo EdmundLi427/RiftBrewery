@@ -34,8 +34,9 @@ export async function runGameplan(
   cardList: Array<{ quantity: number; name: string; type: string; energy?: number | null; might?: number | null; text?: string }>,
   stats: PerDeckStats
 ): Promise<Gameplan> {
-  const cardListText = cardList
-    .map((c) => `${c.quantity}x ${c.name} (${c.type}, cost ${c.energy ?? 'N/A'})`)
+  const validCards = cardList.filter((c) => c && c.name && c.type);
+  const cardListText = validCards
+    .map((c) => `${c.quantity}x ${c.name} (${c.type}${c.energy !== null && c.energy !== undefined ? `, cost ${c.energy}` : ''})`)
     .join('\n');
 
   const statsText = `
