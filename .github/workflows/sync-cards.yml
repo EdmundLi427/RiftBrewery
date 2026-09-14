@@ -20,10 +20,15 @@ jobs:
       - run: pip install -r scripts/requirements.txt
       - id: check
         run: |
-          if python3 scripts/check_sync_needed.py; then
+          python3 scripts/check_sync_needed.py
+          EXIT_CODE=$?
+          if [ $EXIT_CODE -eq 0 ]; then
             echo "sync-needed=true" >> $GITHUB_OUTPUT
-          else
+          elif [ $EXIT_CODE -eq 1 ]; then
             echo "sync-needed=false" >> $GITHUB_OUTPUT
+          else
+            echo "Error: check_sync_needed.py failed with exit code $EXIT_CODE" >&2
+            exit 1
           fi
         env:
           DATABASE_URL: ${{ secrets.DATABASE_URL }}

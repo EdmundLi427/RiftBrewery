@@ -141,14 +141,23 @@ def main() -> int:
     print("fetching /sets from api.riftcodex.com ...", flush=True)
     session = make_session()
     sets_raw = paginate(session, "/sets")
-    api_set_ids = {s["set_id"] for s in sets_raw}
+    api_set_ids = set()
+    for s in sets_raw:
+        if "set_id" not in s:
+            sys.stderr.write(f"Warning: API response missing set_id field: {s}\n")
+            continue
+        api_set_ids.add(s["set_id"])
     print(f"found {len(api_set_ids)} set_ids in API", flush=True)
 
     print("checking database for existing sets ...", flush=True)
-    with psycopg.connect(db_url) as conn:
-        with conn.cursor() as cur:
-            cur.execute('SELECT DISTINCT set_id FROM card_sets WHERE set_id IS NOT NULL')
-            db_set_ids = {row[0] for row in cur.fetchall()}
+    try:
+        with psycopg.connect(db_url) as conn:
+            with conn.cursor() as cur:
+                cur.execute('SELECT DISTINCT set_id FROM card_sets WHERE set_id IS NOT NULL')
+                db_set_ids = {row[0] for row in cur.fetchall()}
+    except Exception as e:
+        sys.stderr.write(f"Database error: {e}\n")
+        return 1
     print(f"found {len(db_set_ids)} set_ids in database", flush=True)
 
     new_sets = api_set_ids - db_set_ids
