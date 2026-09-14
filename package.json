@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "migrate": "node scripts/migrate.mjs",
+    "check-new-sets": "python3 scripts/check_sync_needed.py",
     "sync-cards": "python3 scripts/sync_cards.py",
     "test": "node --test --experimental-strip-types --no-warnings \"tests/**/*.test.ts\""
   },
