@@ -157,7 +157,7 @@ def main() -> int:
                 db_set_ids = {row[0] for row in cur.fetchall()}
     except Exception as e:
         sys.stderr.write(f"Database error: {e}\n")
-        return 1
+        return 2
     print(f"found {len(db_set_ids)} set_ids in database", flush=True)
 
     new_sets = api_set_ids - db_set_ids
